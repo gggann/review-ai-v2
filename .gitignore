@@ -1,0 +1,35 @@
+# Environment variables (contains API keys)
+.env
+.env copy
+.env.*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Cache and output directories
+hash_cache/
+hash_report/
+output/
+temp_videos/
+
+# Video files (too large for GitHub)
+*.mp4
+정지영상모음/
+
+# Large data files
+*.xlsx
+!정지영상_영역별MSE분석.xlsx
+
+# Empty dirs (git doesn't track empty dirs anyway)
+excel/
+testpy/
+
+# IDE
+.trae/
+.claude/
+
+# OS files
+Thumbs.db
+.DS_Store

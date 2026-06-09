@@ -1,0 +1,320 @@
+{
+  "_version": "1.15",
+  "_comment": "동영상 리뷰 0점 감지 규칙 — 부적합 리뷰, 필터 차단 등 0점 처리 케이스 특화",
+  "_수동조율_가이드": {
+    "감지항목추가": "zero_point_items 섹션에 새로운 항목 추가",
+    "판단기준변경": "각 항목의 criteria 및 examples 수정",
+    "CV임계값변경": "detect_screen_recapture_cv 함수의 임계값 수정 (Canny, threshold 등)",
+    "중복감지임계값변경": "DUPLICATE_HASH_THRESHOLD, DUPLICATE_DURATION_MARGIN 상수 수정"
+  },
+  "system_role": "당신은 전자상거래 리뷰 영상의 0점 감지를 수행하는 한국어 전문 심사위원입니다. ONLY output a valid JSON object. No markdown, no explanation.",
+  "core_rules": [
+    "영상이 0점 처리 대상인지 판단하기 위해 4가지 항목을 검사한다.",
+    "4가지 항목 중 하나라도 해당하면 0점으로 판정한다.",
+    "카테고리 정보를 활용하여 상품 일치 여부를 판단한다.",
+    "CV 사전 감지 결과가 있으면 이를 적극 반영한다.",
+    "모든 텍스트 필드는 반드시 한국어로 작성한다.",
+    "상품 정보가 없어도 카테고리 정보와 영상 내용으로 판단한다.",
+    "[v1.7] 같은 카테고리 내 다른 옵션은 같은 상품군으로 판단",
+    "[v1.8] is_screen_recapture의 기본값은 false",
+    "[v1.8] CV 감지 결과가 없으면 AI가 독자적으로 재촬영 판단 불가",
+    "[v1.8] 일반 상품 리뷰 영상은 100% false",
+    "[v1.9] 택배 상자만 노출되는 경우 0점 대신 pass 처리",
+    "[v1.11] 하나의 프레임이라도 올바른 상품이 보이면 is_wrong_product = false",
+    "[v1.13] 리뷰 본문에 덤, 사은품, 이전 상품 비교 등이 있다면 시각적 불일치 무시하고 is_wrong_product = false",
+    "[v1.14] 모음전, 골라담기, 세트 상품의 경우 메인 상품명이나 대표 이미지가 아닌 '구매 옵션(p_opt)'을 기준으로 판단",
+    "[v1.15] 모음전 등 다옵션 상품에서 고객이 단일 품목을 촬영한 경우, 여러 상품이 모여있는 메인 썸네일과 시각적으로 다르다는 이유로 0점(true) 처리하는 것을 절대 금지"
+  ],
+  "zero_point_items": {
+    "is_wrong_product": {
+      "desc": "공식 상품명·카테고리·이미지와 영상 속 상품이 명백히 다른 제품이면 true",
+      "criteria": "카테고리가 다르거나, 같은 카테고리라도 브랜드·디자인이 완전히 다른 제품",
+      "core_principle": "[핵심 원칙] 옵션명(p_opt)이 존재하면 대표 이미지는 무시한다. 모음전/세트는 옵션 기준 판정. 그 외 카테고리가 같으면 기본적으로 false.",
+      "examples": {
+        "true": [
+          "의류(티셔츠) 카테고리인데 영상에 과자·식품이 나옴",
+          "의류(티셔츠) 카테고리인데 영상에 잡화(가방·신발)가 나옴",
+          "남성 셔츠 카테고리인데 영상에 여성 원피스가 나옴"
+        ],
+        "false": [
+          "색상·사이즈·용량 차이만 있고 동일 제품",
+          "상품 정보가 없으면 카테고리 정보를 기준으로 판단"
+        ],
+        "false_patterns_to_prevent": {
+          "desc": "[v1.15] 다음 사유로 true 판단 시 반드시 false로 처리",
+          "사유유형1_색상_외형차이": [
+            "카테고리 내 품종/품질/크기/등급 차이 (예: 파프리카 색상 차이, 양파/채소의 절단 형태 차이) → false",
+            "리뷰어 촬영 각도/조명/해상도에 따른 디자인/로고/패턴/무늬 차이 → false"
+          ],
+          "사유유형2_리뷰본문설명_절대면책": [
+            "[절대 준수] 고객이 리뷰 본문에서 색상, 형태 차이를 직접 언급하며 정상품으로 인지하는 경우: 무조건 false",
+            "[절대 준수] 리뷰 본문에 '서비스', '덤', '사은품', '챙겨주신' 등의 설명이 있는 경우, 영상에 전혀 다른 상품이 보여도: 무조건 false",
+            "[절대 준수] 리뷰 본문에 '빨간색은 예전에 산 거고', '지난번과 다르게', '비교해봤어요' 등 이전 상품과의 비교 언급 시: 무조건 false"
+          ],
+          "사유유형3_모음전옵션_절대면책": [
+            "[절대 준수] 상품명에 '모음전', '세트', '골라담기', '종' 등이 포함된 경우, 영상 속 상품이 대표 이미지 썸네일과 달라도 '구매 옵션'에 해당하는 상품이거나 해당 대카테고리에 속하면 무조건 false"
+          ],
+          "사유유형6_모음딜_이미지불일치": [
+            "[절대 금지] '대표 이미지는 여러 상품이 모여있는데 영상에는 단일 상품만 있다'는 사유로 true 판정 금지 → false",
+            "[절대 금지] '구매 옵션(p_opt)'에 기재된 상품이 영상에 존재함에도 불구하고 공식 메인 이미지와 다르다고 true 판정 금지 → false"
+          ]
+        }
+      },
+      "v1.7_same_category_options": {
+        "desc": "[v1.7] 같은 카테고리 내 옵션 처리",
+        "rules": [
+          "같은 카테고리 내 다른 옵션(클렌징 폼, 스킨, 로션 등)은 같은 상품군 → false",
+          "옵션명에 명시된 제품이 영상에 보이면 정상 → false",
+          "같은 브랜드의 같은 라인(히알론 시리즈, 수퍼아쿠아 시리즈 등) 제품 → false"
+        ]
+      },
+      "packaging_handling": {
+        "desc": "[중요] 포장 상태 처리",
+        "rules": [
+          "영상에 포장 상태(박스, 비닐, 봉투 등)만 보이고 내용물이 확인 안 됨 → false (is_unverifiable로 처리)",
+          "포장 상태라도 카테고리와 일치하면 → false",
+          "같은 브랜드, 같은 카테고리 제품이 보임 → false (색상/사이즈/용량 차이는 무시)"
+        ]
+      },
+      "priority": {
+        "desc": "[판단 우선순위 - 위부터 최우선]",
+        "0순위_옵션절대기준": "구매 옵션(p_opt) 정보가 주어졌다면, 영상 속 상품이 해당 옵션에 맞는지 최우선으로 검증한다. 옵션과 일치하면 썸네일, 메인 상품명과 달라도 무조건 false.",
+        "0순위_모음전_다옵션": "상품이 모음전/세트/골라담기인 경우, 메인 상품명/이미지 무시하고 '구매 옵션(p_opt)' 및 '카테고리' 기준으로 일치하면 → 무조건 false",
+        "0순위_텍스트면책": "고객 리뷰 본문에서 사은품, 덤, 이전 상품 비교, 자연적 변이(숙성/시듦)를 언급하고 있다면 → 시각적 불일치 완전히 무시하고 무조건 false",
+        "1순위": "카테고리가 같으면 → 기본적으로 false",
+        "2순위": "같은 브랜드, 같은 카테고리 → 무조건 false",
+        "3순위": "같은 카테고리 내 다른 옵션 → false",
+        "4순위": "포장 상태만 보임 → false (is_unverifiable 검토)",
+        "5순위": "위 모든 면책 사유에 해당하지 않으면서 명백히 다른 카테고리/브랜드인 경우에만 → true"
+      },
+      "cautions": [
+        "색상·사이즈·용량 차이만 있고 동일 제품이면 false",
+        "상품 정보가 없으면 카테고리 정보를 기준으로 판단하되, 영상 속 물건이 카테고리와 맞는지 확인"
+      ],
+      "category_specific_false_cases": {
+        "desc": "[v1.11] 카테고리별 무조건 false 케이스 - 절대 준수",
+        "식품_채소": [
+          "요리·조리 장면에 다른 식재료(고기, 채소, 양념 등)가 등장해도 구매 상품이 보이면 false",
+          "[v1.13] 농산물의 수확 시기, 숙성도에 따른 자연스러운 색상 변화(예: 붉은 고추와 검붉은 고추의 혼합)는 정상 → false",
+          "[v1.13] 과일/채소: 색상/크기 차이를 '서비스', '덤', '예전 것과 비교'로 고객이 텍스트로 설명하면 무조건 false"
+        ],
+        "꽃_원예_모종": [
+          "모종·씨앗은 성장 단계에 따라 외형이 크게 다름 → 같은 카테고리면 false",
+          "[v1.13] 리뷰에 식물의 상태 변화(시들음, 색상 변이, 싹틈 등)를 언급하면 무조건 false"
+        ],
+        "의류_패션": [
+          "같은 제품의 다른 색상이 영상에 함께 등장해도 false (색상 비교 목적)",
+          "구매 옵션 색상이 착용샷에서 보여도 다른 색상 옷이 동시에 보이면 false",
+          "의류의 절편/경단/핏 등 형태 차이는 같은 의류로 인정 → false"
+        ],
+        "음료_탄산음료": [
+          "번들 상품(2종 이상 묶음)인 경우 각 제품이 모두 나와도 false"
+        ],
+        "문구_학용품": [
+          "세트 상품의 경우 각 품목이 모두 보여도 false (세트 비교 목적)",
+          "랜덤/구성품 차이는 같은 세트 상품으로 인정 → false"
+        ]
+      },
+      "frame_judgment_rule": {
+        "desc": "[v1.11] 보수적 판단 - 프레임 기준",
+        "rule": "하나의 프레임이라도 올바른 상품이 보이면 false",
+        "reason": "리뷰어가 올바른 상품을 보여주려는 의도가 있으면 정상으로 간주",
+        "principle": "6개 프레임 중 1개라도 정상 상품이 식별되면 is_wrong_product = false",
+        "examples": {
+          "false_case": [
+            "6개 프레임 중 1개만 정상 상품 → false (정상)",
+            "어떤 프레임에서든 카테고리와 일치하는 상품이 보임 → false"
+          ],
+          "true_case": [
+            "모든 프레임(6개 전부)에서 명백히 다른 카테고리 상품만 보임 → true"
+          ]
+        },
+        "enforcement": [
+          "AI는 모든 프레임을 동시에 보지만, 하나라도 정상이면 무조건 false로 판단"
+        ]
+      }
+    },
+    "is_irrelevant": {
+      "desc": "상품이 전혀 보이지 않고 무관한 것만 찍히면 true",
+      "criteria": "영상 전체에서 상품이 전혀 등장하지 않음",
+      "examples": {
+        "true": [
+          "바닥만 찍힘 / 하늘만 찍힘",
+          "강아지·고양이만 찍힘",
+          "사람 얼굴·일상만 찍히고 상품이 없음"
+        ]
+      }
+    },
+    "is_delivery_box_only": {
+      "desc": "[v1.9 변경] 택배 상자나 송장만 보이는 경우 - 이제 0점이 아닌 pass 처리",
+      "criteria": "택배 상자만 보여도 상품이 도착했다는 의미이므로 정상으로 간주",
+      "examples": {
+        "pass": [
+          "누런 택배 박스만 찍힘 → pass (상품 도착 확인)",
+          "송장 스티커만 찍힘 → pass (상품 도착 확인)"
+        ]
+      }
+    },
+    "is_screen_recapture": {
+      "desc": "모니터나 스마트폰 화면을 다시 찍은 영상이면 true",
+      "criteria": "[v1.8 강화] 화면 재촬영 감지 기준 - AI 독자 판단 금지 + 기본값 false",
+      "v1.8_core_rules": {
+        "기본값": "is_screen_recapture의 기본값은 false입니다.",
+        "CV_결과_준수": "CV 사전 감지 결과가 '화면 재촬영 징후 없음'이면 is_screen_recapture = false (절대 변경 불가)"
+      },
+      "v1.8_forced_rules": {
+        "desc": "[v1.8] 다음 경우는 재촬영 감지 시스템이 작동하지 않습니다",
+        "cases": [
+          "[CV 사전 감지 결과] '화면 재촬영 징후 없음' → is_screen_recapture = false (예외 없음)",
+          "상품이 영상에 보임 → is_screen_recapture = false (예외 없음)",
+          "포장지, 비닐, 랩이 보임 → is_screen_recapture = false (예외 없음)"
+        ]
+      },
+      "detection_types": {
+        "monitor_frame": {
+          "desc": "모니터 화면 촬영 징후",
+          "signs": [
+            "모니터 베젤(검은 테두리 프레임)이 화면 가장자리에 명확히 보임",
+            "모니터 화면이 별도의 사각형 영역으로 구분됨"
+          ],
+          "cv_confidence": 0.4,
+          "min_lines": 8,
+          "edge_only": true
+        },
+        "smartphone_screen": {
+          "desc": "스마트폰 화면 촬영 징후",
+          "signs": [
+            "스마트폰 기기 자체(베젤, 버튼)가 명확히 보임",
+            "손이 스마트폰을 잡고 있는 형태가 보임"
+          ],
+          "cv_confidence": 0.3
+        },
+        "recording_app": {
+          "desc": "녹화 앱/웹캠 촬영 징후",
+          "signs": [
+            "웹사이트 UI 요소(브라우저 주소창, 버튼, 메뉴)가 명확히 보임",
+            "플레이어 컨트롤(재생/일시정지 버튼, 진행바)이 보임"
+          ],
+          "cv_confidence": 0.2,
+          "text_density_threshold": 0.2
+        }
+      },
+      "v1.8_exclusions": {
+        "desc": "[v1.8] 절대 재촬영이 아닌 경우 - 무조건 false (AI가 true로 판단하면 오류)",
+        "cases": [
+          "상품을 직접 손으로 잡고 찍는 영상",
+          "상품 포장지, 라벨, 텍스트가 보이는 영상 (이건 정상!)",
+          "영상 품질이 낮거나 흐린 영상 (이건 정상!)"
+        ]
+      },
+      "v1.8_priority": {
+        "desc": "[판단 우선순위 - 절대 준수]",
+        "1순위": "CV 감지 결과가 '징후 없음'이면 → 무조건 false",
+        "2순위": "상품이 영상에 보이면 → 무조건 false",
+        "3순위": "포장지/비닐/랩이 보이면 → 무조건 false"
+      },
+      "v1.8_enforcement": {
+        "desc": "[v1.8] 강제 사항",
+        "rules": [
+          "CV 감지 결과가 없으면 is_screen_recapture = false로 설정",
+          "영상에 상품이 보이면 is_screen_recapture = false로 설정"
+        ]
+      }
+    },
+    "is_unverifiable": {
+      "desc": "상품이 있을 것 같지만 영상 품질 문제로 어떤 상품인지 전혀 확인이 불가능한 경우",
+      "criteria": "상품 식별이 불가능한 영상 품질 문제",
+      "examples": {
+        "true": [
+          "손떨림이 극심해 모든 프레임이 흔들려 상품 형태가 전혀 식별 안 됨",
+          "영상 전체가 심하게 흐릿하거나 초점이 완전히 나간 상태 (블러)"
+        ],
+        "false": [
+          "영상 일부라도 상품이 어느 정도 식별된다면 false"
+        ]
+      },
+      "packaging_handling": {
+        "desc": "[포장 상태 특별 처리]",
+        "rules": [
+          "영상에 포장 상태(박스, 비닐, 봉투 등)만 보이고 내용물이 확인 안 됨 → is_unverifiable = true",
+          "포장 상태라도 카테고리와 일치하면 is_wrong_product = false, is_unverifiable = true"
+        ]
+      }
+    }
+  },
+  "cv_detection": {
+    "screen_recapture": {
+      "monitor_frame": {
+        "method": "Canny edge + Hough line transform",
+        "threshold": {
+          "canny_low": 50,
+          "canny_high": 150,
+          "hough_threshold": 100,
+          "min_line_length": 150,
+          "max_line_gap": 10,
+          "line_count_threshold": 8,
+          "edge_region_ratio": 0.1
+        },
+        "confidence": 0.4
+      },
+      "ui_elements": {
+        "method": "Gaussian blur + Canny edge",
+        "threshold": {
+          "blur_kernel": [5, 5],
+          "canny_low": 30,
+          "canny_high": 100,
+          "text_density_threshold": 0.2
+        },
+        "confidence": 0.2
+      },
+      "aspect_ratio": {
+        "method": "Frame dimension check",
+        "threshold": {
+          "min_ratio": 1.2,
+          "max_ratio": 1.9
+        },
+        "confidence": 0.1
+      }
+    },
+    "frame_consistency": {
+      "method": "Frame difference analysis",
+      "threshold": {
+        "diff_threshold": 30,
+        "diff_ratio_threshold": 0.3
+      },
+      "purpose": "급격한 화면 전환 감지 (녹화 앱 전환)"
+    },
+    "combined_threshold": {
+      "total_confidence_min": 0.8,
+      "min_detected_types": 2
+    }
+  },
+  "frame_extraction": {
+    "method": "Motion-based + Uniform distribution hybrid",
+    "max_frames": 6,
+    "sample_multiplier": 3,
+    "motion_threshold": {
+      "mad_min": 10
+    },
+    "description": "움직임 기반 프레임 선택으로 대표성 있는 프레임 추출"
+  },
+  "duplicate_detection": {
+    "method": "Multi-frame dual hash (average_hash + phash)",
+    "frames_to_compare": 3,
+    "thresholds": {
+      "avg_hash_hamming_distance": 15,
+      "phash_hamming_distance_multiplier": 2,
+      "duration_margin_seconds": 0.5
+    }
+  },
+  "output_format": {
+    "is_wrong_product": "boolean",
+    "wrong_product_reason": "string (is_wrong_product가 true일 때 사유)",
+    "is_irrelevant": "boolean",
+    "is_delivery_box_only": "boolean (v1.9부터 0점이 아닌 pass 처리)",
+    "is_screen_recapture": "boolean",
+    "screen_recapture_type": "string (is_screen_recapture가 true일 때 감지된 유형)",
+    "is_unverifiable": "boolean",
+    "unverifiable_reason": "string (is_unverifiable가 true일 때 사유)"
+  }
+}
